@@ -9,11 +9,9 @@ import {
   isInsideWorktree,
 } from "../utils/git.js";
 import { planEnvCopy, copyEnvFiles } from "../utils/env.js";
-import { planNodeModulesLinks, linkNodeModules } from "../utils/node-modules.js";
 
 function detectRunner(scriptPath: string): string[] {
   if (scriptPath.endsWith(".ts")) {
-    // Prefer bun, fall back to tsx
     try {
       spawnSync("bun", ["--version"], { stdio: "pipe" });
       return ["bun", "run", scriptPath];
@@ -44,12 +42,10 @@ export async function setupCommand(params: { yes?: boolean; overwrite?: boolean 
 
   // ── Plans ────────────────────────────────────────────────────────────────────
   const envPlans = planEnvCopy({ mainPath: main.path, worktreePath });
-  const nmPlans = planNodeModulesLinks({ mainPath: main.path, worktreePath });
 
   // ── Setup script detection ──────────────────────────────────────────────────
   const setupScriptTs = join(main.path, "scripts/setup-worktree.ts");
   const setupScriptSh = join(main.path, "scripts/setup-worktree.sh");
-  // Prefer .ts if both exist
   const setupScript = existsSync(setupScriptTs)
     ? setupScriptTs
     : existsSync(setupScriptSh)
@@ -57,19 +53,13 @@ export async function setupCommand(params: { yes?: boolean; overwrite?: boolean 
       : null;
 
   // ── Preview ─────────────────────────────────────────────────────────────────
-  const hasWork =
-    envPlans.length > 0 ||
-    nmPlans.some((p) => p.status === "symlink") ||
-    setupScript;
-
-  if (!hasWork) {
+  if (envPlans.length === 0 && !setupScript) {
     p.outro("Nothing to do — worktree already set up.");
     return;
   }
 
   console.log("\nPlanned actions:\n");
 
-  // Env files
   if (envPlans.length > 0) {
     console.log("  Env files:");
     for (const plan of envPlans) {
@@ -86,27 +76,10 @@ export async function setupCommand(params: { yes?: boolean; overwrite?: boolean 
     console.log("  Env files: none found in main repo");
   }
 
-  // node_modules
-  if (nmPlans.length > 0) {
-    console.log("\n  node_modules (symlink):");
-    for (const plan of nmPlans) {
-      if (plan.status === "already-exists") {
-        console.log(`    - skip      ${plan.rel}  (already exists)`);
-      } else {
-        console.log(`    - symlink   ${plan.rel}`);
-      }
-    }
-  } else {
-    console.log("\n  node_modules: none found in main repo");
-  }
-
-  // Setup script
   if (setupScript) {
     const runner = detectRunner(setupScript);
     console.log(`\n  Setup script: ${basename(setupScript)}`);
     console.log(`    runner: ${runner.slice(0, 2).join(" ")}`);
-  } else {
-    console.log("\n  Setup script: none found (scripts/setup-worktree.sh or .ts)");
   }
 
   console.log();
@@ -125,8 +98,6 @@ export async function setupCommand(params: { yes?: boolean; overwrite?: boolean 
   }
 
   // ── Execute ─────────────────────────────────────────────────────────────────
-
-  // Env files
   if (envPlans.length > 0) {
     const { copied, skipped } = copyEnvFiles({
       plans: envPlans,
@@ -136,14 +107,6 @@ export async function setupCommand(params: { yes?: boolean; overwrite?: boolean 
     for (const f of skipped) p.log.message(`Skipped  ${f} (already exists, use --overwrite)`);
   }
 
-  // node_modules symlinks
-  if (nmPlans.length > 0) {
-    const { linked, skipped } = linkNodeModules({ plans: nmPlans });
-    for (const rel of linked) p.log.success(`Linked   ${rel}`);
-    for (const rel of skipped) p.log.message(`Skipped  ${rel} (already exists)`);
-  }
-
-  // Setup script
   if (setupScript) {
     const runner = detectRunner(setupScript);
     p.log.step(`Running ${basename(setupScript)}...`);
