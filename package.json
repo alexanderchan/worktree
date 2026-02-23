@@ -1,0 +1,23 @@
+{
+  "name": "wt-cli",
+  "version": "1.0.0",
+  "description": "Global worktree CLI for managing git worktrees",
+  "type": "module",
+  "bin": {
+    "wt": "./dist/wt.js"
+  },
+  "scripts": {
+    "build": "bun build src/index.ts --target=node --outfile dist/wt.js && chmod +x dist/wt.js",
+    "build:compile": "bun build src/index.ts --compile --outfile dist/wt",
+    "dev": "bun run src/index.ts",
+    "link": "npm link"
+  },
+  "dependencies": {
+    "@commander-js/extra-typings": "^13.1.0",
+    "@clack/prompts": "^0.10.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "bun-types": "latest"
+  }
+}
