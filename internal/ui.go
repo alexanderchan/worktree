@@ -3,6 +3,7 @@ package internal
 import (
 	"fmt"
 	"math"
+	"os/exec"
 	"sort"
 	"strings"
 	"time"
@@ -242,9 +243,9 @@ func formatItem(item Item, maxWidth int) string {
 		if p == "" {
 			p = item.Path
 		}
-		// Truncate path if needed
-		if maxWidth > 0 && len(p) > 30 {
-			p = "…" + p[len(p)-29:]
+		// Truncate path if needed (rune-safe).
+		if runes := []rune(p); maxWidth > 0 && len(runes) > 30 {
+			p = "…" + string(runes[len(runes)-29:])
 		}
 		right = pathSty.Render(p)
 		if item.Head != "" {
@@ -278,24 +279,78 @@ func timeAgo(t time.Time) string {
 	}
 }
 
+// --- Branch details panel ---
+
+// BranchDetails holds async-fetched info about the currently selected item.
+type BranchDetails struct {
+	FullPath    string
+	LastCommit  string // relative date string from git log
+	IsDirty     bool
+	DirtyCount  int
+	Err         string // non-empty if fetch failed
+}
+
+// detailsMsg is a Bubble Tea message carrying fetched details.
+type detailsMsg struct {
+	details BranchDetails
+}
+
+// fetchDetails returns a Bubble Tea Cmd that fetches branch details asynchronously.
+func fetchDetails(item Item) tea.Cmd {
+	return func() tea.Msg {
+		d := BranchDetails{FullPath: item.Path}
+
+		if item.Path == "" {
+			d.Err = "no local path (recent branch)"
+			return detailsMsg{d}
+		}
+
+		// Last commit date (relative).
+		out, err := exec.Command("git", "-C", item.Path, "log", "-1", "--format=%cd", "--date=relative").Output()
+		if err == nil {
+			d.LastCommit = strings.TrimSpace(string(out))
+		}
+
+		// Dirty status — count lines from `git status --porcelain`.
+		out, err = exec.Command("git", "-C", item.Path, "status", "--porcelain").Output()
+		if err == nil {
+			lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+			count := 0
+			for _, l := range lines {
+				if strings.TrimSpace(l) != "" {
+					count++
+				}
+			}
+			d.DirtyCount = count
+			d.IsDirty = count > 0
+		}
+
+		return detailsMsg{d}
+	}
+}
+
 // --- Bubble Tea model ---
 
 const (
-	headerLines = 4 // title + blank + filter + blank
-	helpLines   = 1
-	minVPHeight = 3
+	headerLines  = 4 // title + blank + filter + blank
+	helpLines    = 1
+	detailLines  = 4 // separator + path + commit/dirty + blank
+	minVPHeight  = 3
 )
 
 type filterableSelector struct {
-	filter   textinput.Model
-	viewport viewport.Model
-	all      []Item
-	filtered []Item
-	cursor   int
-	result   *Item
-	quitting bool
-	width    int
-	height   int
+	filter         textinput.Model
+	viewport       viewport.Model
+	all            []Item
+	filtered       []Item
+	cursor         int
+	result         *Item
+	quitting       bool
+	width          int
+	height         int
+	showDetails    bool
+	details        *BranchDetails
+	detailsLoading bool
 }
 
 func (m *filterableSelector) Init() tea.Cmd {
@@ -305,7 +360,25 @@ func (m *filterableSelector) Init() tea.Cmd {
 func (m *filterableSelector) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch msg := msg.(type) {
+	case detailsMsg:
+		d := msg.details
+		m.details = &d
+		m.detailsLoading = false
+		return m, nil
+
 	case tea.KeyMsg:
+		// Intercept '?' before passing to textinput (rune keys can vary by terminal).
+		if msg.Type == tea.KeyRunes && len(msg.Runes) == 1 && msg.Runes[0] == '?' {
+			m.showDetails = !m.showDetails
+			m.viewport.Height = m.vpHeight()
+			if m.showDetails && len(m.filtered) > 0 {
+				m.details = nil
+				m.detailsLoading = true
+				return m, fetchDetails(m.filtered[m.cursor])
+			}
+			return m, nil
+		}
+
 		switch msg.String() {
 		case "ctrl+c", "q":
 			m.quitting = true
@@ -320,8 +393,13 @@ func (m *filterableSelector) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "esc", "ctrl+u":
+			if m.showDetails {
+				m.showDetails = false
+				m.viewport.Height = m.vpHeight()
+				return m, nil
+			}
 			m.filter.SetValue("")
-			m.filtered = m.all
+			m.filtered = FilterItems(m.all, "")
 			m.cursor = 0
 			m.viewport.GotoTop()
 
@@ -332,6 +410,11 @@ func (m *filterableSelector) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cursor = max(0, len(m.filtered)-1)
 			}
 			m.scrollToCursor()
+			if m.showDetails && len(m.filtered) > 0 {
+				m.details = nil
+				m.detailsLoading = true
+				return m, fetchDetails(m.filtered[m.cursor])
+			}
 
 		case "down":
 			if m.cursor < len(m.filtered)-1 {
@@ -340,6 +423,11 @@ func (m *filterableSelector) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cursor = 0
 			}
 			m.scrollToCursor()
+			if m.showDetails && len(m.filtered) > 0 {
+				m.details = nil
+				m.detailsLoading = true
+				return m, fetchDetails(m.filtered[m.cursor])
+			}
 
 		default:
 			m.filter, cmd = m.filter.Update(msg)
@@ -348,6 +436,11 @@ func (m *filterableSelector) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cursor = 0
 			}
 			m.scrollToCursor()
+			if m.showDetails && len(m.filtered) > 0 {
+				m.details = nil
+				m.detailsLoading = true
+				return m, tea.Batch(cmd, fetchDetails(m.filtered[m.cursor]))
+			}
 			return m, cmd
 		}
 
@@ -355,11 +448,19 @@ func (m *filterableSelector) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.filter.Width = msg.Width - 3
-		vpH := max(msg.Height-headerLines-helpLines, minVPHeight)
 		m.viewport.Width = msg.Width
-		m.viewport.Height = vpH
+		m.viewport.Height = m.vpHeight()
 	}
 	return m, cmd
+}
+
+// vpHeight computes the viewport height based on terminal size and panel visibility.
+func (m *filterableSelector) vpHeight() int {
+	extra := 0
+	if m.showDetails {
+		extra = detailLines
+	}
+	return max(m.height-headerLines-helpLines-extra, minVPHeight)
 }
 
 func (m *filterableSelector) scrollToCursor() {
@@ -399,9 +500,37 @@ func (m *filterableSelector) View() string {
 	}
 
 	m.viewport.SetContent(content.String())
-	m.scrollToCursor()
 	b.WriteString(m.viewport.View())
-	b.WriteString(dimStyle.Render("\n↑/↓: navigate • enter: select • esc: clear • q: quit"))
+
+	if m.showDetails {
+		b.WriteString("\n" + dimStyle.Render(strings.Repeat("─", m.width)) + "\n")
+		if m.detailsLoading {
+			b.WriteString(dimStyle.Render("  Loading…") + "\n")
+		} else if m.details != nil {
+			if m.details.Err != "" {
+				b.WriteString(dimStyle.Render("  "+m.details.Err) + "\n")
+			} else {
+				path := m.details.FullPath
+				if path == "" {
+					path = "(no local path)"
+				}
+				b.WriteString(pathSty.Render("  "+path) + "\n")
+				var meta []string
+				if m.details.LastCommit != "" {
+					meta = append(meta, "last commit: "+m.details.LastCommit)
+				}
+				if m.details.IsDirty {
+					meta = append(meta, fmt.Sprintf("dirty: %d file(s)", m.details.DirtyCount))
+				} else {
+					meta = append(meta, "clean")
+				}
+				b.WriteString(dimStyle.Render("  "+strings.Join(meta, "  •  ")) + "\n")
+			}
+		}
+	}
+
+	helpText := "↑/↓: navigate • enter: select • esc: clear • ?: details • q: quit"
+	b.WriteString(dimStyle.Render("\n" + helpText))
 	return b.String()
 }
 
@@ -425,6 +554,7 @@ func ShowSelection(items []Item) (*Item, error) {
 		viewport: vp,
 		all:      items,
 		filtered: items,
+		height:   24, // sensible default; overwritten by WindowSizeMsg
 	}
 
 	p := tea.NewProgram(m, tea.WithAltScreen())

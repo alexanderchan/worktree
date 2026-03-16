@@ -17,7 +17,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	currentPath, _ := wt.GetCurrentPath()
+	currentPath, err := wt.GetCurrentPath()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "wt: warning: could not determine current directory: %v\n", err)
+	}
 
 	worktrees, err := wt.GetWorktrees()
 	if err != nil {
@@ -42,6 +45,9 @@ func main() {
 		displayPath := tree.Path
 		if mainPath != "" && strings.HasPrefix(tree.Path, mainPath+"/") {
 			displayPath = "." + tree.Path[len(mainPath):]
+		}
+		if tree.IsPrunable {
+			displayPath += " (prunable)"
 		}
 
 		items = append(items, wt.Item{
@@ -70,11 +76,13 @@ func main() {
 	items = wt.ScoreItems(items, usage, len(recentBranches))
 
 	selected, err := wt.ShowSelection(items)
-	if err != nil || selected == nil {
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "wt: error:", err)
+		os.Exit(1)
+	}
+	if selected == nil {
 		os.Exit(0)
 	}
-
-	_ = wt.RecordUsage(repoRoot, selected.Branch)
 
 	if selected.IsWorktree {
 		fmt.Printf("Opening shell in: %s\n", selected.Path)
@@ -84,20 +92,24 @@ func main() {
 			shell = "/bin/bash"
 		}
 		if err := os.Chdir(selected.Path); err != nil {
-			fmt.Fprintln(os.Stderr, "Error:", err)
+			fmt.Fprintln(os.Stderr, "wt: error:", err)
 			os.Exit(1)
 		}
+		// Record usage only after we know the directory exists and we can cd into it.
+		_ = wt.RecordUsage(repoRoot, selected.Branch)
 		if err := syscall.Exec(shell, []string{shell}, os.Environ()); err != nil {
-			fmt.Fprintln(os.Stderr, "Error exec shell:", err)
+			fmt.Fprintln(os.Stderr, "wt: error exec shell:", err)
 			os.Exit(1)
 		}
 	} else {
-		// Recent branch — just git checkout in current directory
+		// Recent branch — git checkout in current directory.
 		cmd := exec.Command("git", "checkout", selected.Branch)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
 			os.Exit(1)
 		}
+		// Record usage only after checkout succeeded.
+		_ = wt.RecordUsage(repoRoot, selected.Branch)
 	}
 }

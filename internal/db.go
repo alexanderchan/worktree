@@ -2,6 +2,7 @@ package internal
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -22,11 +23,16 @@ func dbPath() string {
 
 func loadDB() frecencyDB {
 	data, err := os.ReadFile(dbPath())
+	if os.IsNotExist(err) {
+		return make(frecencyDB)
+	}
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "wt: warning: could not read frecency db: %v\n", err)
 		return make(frecencyDB)
 	}
 	var db frecencyDB
 	if err := json.Unmarshal(data, &db); err != nil {
+		fmt.Fprintf(os.Stderr, "wt: warning: frecency db is corrupt, starting fresh: %v\n", err)
 		return make(frecencyDB)
 	}
 	return db
@@ -41,7 +47,12 @@ func saveDB(db frecencyDB) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0644)
+	// Write to a temp file then rename for atomic replacement.
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 func GetUsage(repoRoot string) map[string]UsageRecord {
