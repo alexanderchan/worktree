@@ -11,7 +11,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/lithammer/fuzzysearch/fuzzy"
+	sfuzzy "github.com/sahilm/fuzzy"
 )
 
 // Item represents a selectable worktree or recent branch.
@@ -81,8 +81,7 @@ func FilterItems(items []Item, query string) []Item {
 	}
 	var results []ranked
 	for _, item := range items {
-		r := fuzzyRank(item.Branch, query)
-		if r > 0 {
+		if r := fuzzyRank(item.Branch, query); r > 0 {
 			results = append(results, ranked{item, r})
 		}
 	}
@@ -101,41 +100,115 @@ func FilterItems(items []Item, query string) []Item {
 
 func fuzzyRank(branch, query string) int {
 	lower := strings.ToLower(branch)
-	q := strings.ToLower(query)
-
-	words := strings.Fields(q)
-
-	// Single-word: exact → prefix → contains → fuzzy
-	if len(words) <= 1 {
-		if lower == q {
-			return 1000
-		}
-		if strings.HasPrefix(lower, q) {
-			return 500
-		}
-		if strings.Contains(lower, q) {
-			return 300
-		}
-		if fuzzy.Match(q, lower) {
-			return 100
-		}
+	words := strings.Fields(strings.ToLower(query))
+	if len(words) == 0 {
 		return 0
 	}
 
-	// Multi-word: every word must independently match the branch name.
+	// Phase 1: exact/prefix/contains/sahilm — every word must match.
 	// Dashes/slashes in branch names act as word separators, so "doc intel"
-	// should match "implement-doc-intelligence".
-	minScore := 250
+	// matches "implement-doc-intelligence" because both words are found.
+	totalScore := 0
 	for _, word := range words {
-		if strings.Contains(lower, word) {
-			// exact substring — keep current score
-		} else if fuzzy.Match(word, lower) {
-			minScore = min(minScore, 100) // weaker match lowers overall score
+		var wordScore int
+		if lower == word {
+			wordScore = 1000
+		} else if strings.HasPrefix(lower, word) {
+			wordScore = 500
+		} else if strings.Contains(lower, word) {
+			wordScore = 300
 		} else {
-			return 0 // any word missing → no match
+			// sahilm/fuzzy: word-boundary and consecutive-character bonuses.
+			// A non-empty result means the chars were found in order (valid
+			// subsequence). Use the score for ranking but floor at 1 so a
+			// marginal subsequence match is never discarded.
+			if m := sfuzzy.Find(word, []string{lower}); len(m) > 0 {
+				wordScore = max(1, m[0].Score+40)
+			}
+		}
+		if wordScore == 0 {
+			totalScore = 0
+			break
+		}
+		totalScore += wordScore
+	}
+	if totalScore > 0 {
+		return totalScore
+	}
+
+	// Phase 2: typo-tolerant fallback via Levenshtein on word segments.
+	// Scores are intentionally lower than phase 1 so typo matches rank below
+	// clean matches.
+	return typoFallbackRank(branch, query)
+}
+
+// typoFallbackRank is used when fuzzyRank returns 0. It splits the branch on
+// separators and checks each query word against each segment using Levenshtein
+// edit distance. This catches transpositions and missing characters that break
+// subsequence matching (e.g. "lcl" → "local").
+//
+// Scores are intentionally much lower than fuzzyRank so typo matches always
+// rank below clean matches.
+func typoFallbackRank(branch, query string) int {
+	lower := strings.ToLower(branch)
+	words := strings.Fields(strings.ToLower(query))
+	if len(words) == 0 {
+		return 0
+	}
+
+	segments := strings.FieldsFunc(lower, func(r rune) bool {
+		return r == '-' || r == '/' || r == '_' || r == '.' || r == ' '
+	})
+	if len(segments) == 0 {
+		segments = []string{lower}
+	}
+
+	totalScore := 0
+	for _, word := range words {
+		// Allow 1 error per 2 chars above a minimum length.
+		// Short words (≤3 chars) get no typo tolerance — too many false positives.
+		// 4 chars→1, 6 chars→2, 8 chars→3, etc.
+		threshold := max(0, (len([]rune(word))-2)/2)
+		best := 0
+		for _, seg := range segments {
+			d := levenshtein(word, seg)
+			if d <= threshold {
+				score := max(1, 30-d*10) // 30 → 20 → 10 → 1 as errors increase
+				if score > best {
+					best = score
+				}
+			}
+		}
+		if best == 0 {
+			return 0 // word didn't match any segment even with typos
+		}
+		totalScore += best
+	}
+	return totalScore
+}
+
+// levenshtein computes the edit distance between two strings.
+func levenshtein(a, b string) int {
+	ra, rb := []rune(a), []rune(b)
+	m, n := len(ra), len(rb)
+	dp := make([]int, n+1)
+	for j := range dp {
+		dp[j] = j
+	}
+	for i := 1; i <= m; i++ {
+		prev := dp[0]
+		dp[0] = i
+		for j := 1; j <= n; j++ {
+			tmp := dp[j]
+			if ra[i-1] == rb[j-1] {
+				dp[j] = prev
+			} else {
+				dp[j] = 1 + min(prev, min(dp[j], dp[j-1]))
+			}
+			prev = tmp
 		}
 	}
-	return minScore
+	return dp[n]
 }
 
 // --- Styles ---
