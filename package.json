@@ -4,10 +4,13 @@
   "description": "Global worktree CLI for managing git worktrees",
   "type": "module",
   "bin": {
-    "wt": "./dist/wt.js"
+    "wt": "./dist/wt.js",
+    "wt-go": "./dist/wt-go"
   },
   "scripts": {
-    "build": "bun build src/index.ts --target=node --outfile dist/wt.js && chmod +x dist/wt.js",
+    "build": "bun build src/index.ts --target=node --outfile dist/wt.js && chmod +x dist/wt.js && go build -o dist/wt-go ./cmd/wt-go",
+    "build:go": "go build -o dist/wt-go ./cmd/wt-go",
+    "build:ts": "bun build src/index.ts --target=node --outfile dist/wt.js && chmod +x dist/wt.js",
     "build:compile": "bun build src/index.ts --compile --outfile dist/wt",
     "dev": "bun run src/index.ts",
     "link": "npm link"
