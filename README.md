@@ -13,6 +13,22 @@ npm link
 
 `wt` is then available globally in your shell.
 
+### Shell integration (required for `wt go`)
+
+`wt go` needs a shell wrapper so it can `cd` in your current session. Add this to your `~/.zshrc` (or `~/.bashrc`):
+
+```bash
+eval "$(wt init)"
+```
+
+Then reload your shell:
+
+```bash
+source ~/.zshrc
+```
+
+Without this, `wt go` will print the selected path but won't change your directory.
+
 ## Commands
 
 ### `wt list` / `wt ls`
@@ -30,14 +46,14 @@ List all worktrees in the current git repo. The current worktree is marked with 
 
 ### `wt go [branch]`
 
-Interactive worktree picker that spawns a shell in the selected worktree.
+Interactive worktree picker — select a worktree and `cd` into it.
 
 ```bash
 wt go                  # interactive picker
 wt go feature-branch   # jump directly by branch name or partial match
 ```
 
-Before opening the shell, `wt go` checks whether the target worktree needs setup (missing `.env.*` files, or a setup script exists in the repo). If so, it offers to run `wt setup --yes` first.
+Requires [shell integration](#shell-integration-required-for-wt-go) to change your working directory.
 
 ---
 

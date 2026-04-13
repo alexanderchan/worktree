@@ -3,6 +3,7 @@ package internal
 import (
 	"fmt"
 	"math"
+	"os"
 	"os/exec"
 	"sort"
 	"strings"
@@ -535,10 +536,18 @@ func (m *filterableSelector) View() string {
 }
 
 // ShowSelection runs the interactive TUI and returns the selected item (or nil if cancelled).
+// Uses /dev/tty for both input and output so the TUI works even when stdout is piped,
+// leaving stdout clean for the shell wrapper to capture the selected path.
 func ShowSelection(items []Item) (*Item, error) {
 	if len(items) == 0 {
 		return nil, fmt.Errorf("no items available")
 	}
+
+	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+	if err != nil {
+		return nil, fmt.Errorf("cannot open /dev/tty: %w", err)
+	}
+	defer tty.Close()
 
 	ti := textinput.New()
 	ti.Placeholder = "Type to filter..."
@@ -557,7 +566,7 @@ func ShowSelection(items []Item) (*Item, error) {
 		height:   24, // sensible default; overwritten by WindowSizeMsg
 	}
 
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithInput(tty), tea.WithOutput(tty))
 	final, err := p.Run()
 	if err != nil {
 		return nil, err

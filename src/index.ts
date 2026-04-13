@@ -2,6 +2,7 @@
 import { Command } from "@commander-js/extra-typings";
 import { listCommand } from "./commands/list.js";
 import { goCommand } from "./commands/go.js";
+import { initCommand } from "./commands/init.js";
 import { setupCommand } from "./commands/setup.js";
 
 const program = new Command()
@@ -16,6 +17,16 @@ program
   .description("List all worktrees in the current repo")
   .action(() => {
     listCommand();
+  });
+
+// ── init ────────────────────────────────────────────────────────────────────
+program
+  .command("init")
+  .description(
+    "Print shell integration code — add eval \"$(wt init)\" to your .zshrc"
+  )
+  .action(() => {
+    initCommand();
   });
 
 // ── go ───────────────────────────────────────────────────────────────────────
