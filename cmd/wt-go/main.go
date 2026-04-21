@@ -1,115 +1,46 @@
+// wt-go dispatches to the interactive worktree picker (default) or to
+// subcommands like `cleanup`. The shell wrapper `wt` forwards user commands
+// that aren't handled in TypeScript (`list`, `setup`) to this binary.
 package main
 
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
-	"syscall"
-
-	wt "github.com/alexanderchan/wt/internal"
 )
 
+func usage() {
+	fmt.Fprintln(os.Stderr, `wt-go — worktree picker & cleanup
+
+Usage:
+  wt-go                       run the interactive worktree picker (default)
+  wt-go cleanup [flags]       prune stale worktrees (dry-run by default)
+  wt-go -h | --help           show this help
+
+Run "wt-go cleanup --help" for cleanup flags.`)
+}
+
 func main() {
-	repoRoot, err := wt.GetRepoRoot()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "Error: not inside a git repository")
-		os.Exit(1)
+	args := os.Args[1:]
+	if len(args) == 0 {
+		runPicker(nil)
+		return
 	}
-
-	currentPath, err := wt.GetCurrentPath()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "wt: warning: could not determine current directory: %v\n", err)
-	}
-
-	worktrees, err := wt.GetWorktrees()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "Error getting worktrees:", err)
-		os.Exit(1)
-	}
-
-	mainPath := ""
-	if len(worktrees) > 0 {
-		mainPath = worktrees[0].Path
-	}
-
-	worktreeByBranch := make(map[string]bool)
-	var items []wt.Item
-
-	for _, tree := range worktrees {
-		if tree.Branch == "(detached)" {
-			continue
+	switch args[0] {
+	case "cleanup":
+		runCleanup(args[1:])
+	case "go", "pick":
+		runPicker(args[1:])
+	case "-h", "--help", "help":
+		usage()
+	default:
+		// Treat unknown leading tokens (like --branches) as picker flags.
+		if strings.HasPrefix(args[0], "-") {
+			runPicker(args)
+			return
 		}
-		worktreeByBranch[tree.Branch] = true
-
-		displayPath := tree.Path
-		if mainPath != "" && strings.HasPrefix(tree.Path, mainPath+"/") {
-			displayPath = "." + tree.Path[len(mainPath):]
-		}
-		if tree.IsPrunable {
-			displayPath += " (prunable)"
-		}
-
-		items = append(items, wt.Item{
-			Branch:      tree.Branch,
-			Path:        tree.Path,
-			DisplayPath: displayPath,
-			IsWorktree:  true,
-			IsCurrent:   tree.Path == currentPath,
-			IsMain:      tree.IsMain,
-			Head:        tree.Head,
-			ReflogPos:   -1,
-		})
-	}
-
-	recentBranches, _ := wt.GetRecentBranches(10)
-	for i, branch := range recentBranches {
-		if !worktreeByBranch[branch] {
-			items = append(items, wt.Item{
-				Branch:    branch,
-				ReflogPos: i,
-			})
-		}
-	}
-
-	usage := wt.GetUsage(repoRoot)
-	items = wt.ScoreItems(items, usage, len(recentBranches))
-
-	selected, err := wt.ShowSelection(items)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "wt: error:", err)
-		os.Exit(1)
-	}
-	if selected == nil {
-		os.Exit(0)
-	}
-
-	if selected.IsWorktree {
-		fmt.Printf("Opening shell in: %s\n", selected.Path)
-
-		shell := os.Getenv("SHELL")
-		if shell == "" {
-			shell = "/bin/bash"
-		}
-		if err := os.Chdir(selected.Path); err != nil {
-			fmt.Fprintln(os.Stderr, "wt: error:", err)
-			os.Exit(1)
-		}
-		// Record usage only after we know the directory exists and we can cd into it.
-		_ = wt.RecordUsage(repoRoot, selected.Branch)
-		if err := syscall.Exec(shell, []string{shell}, os.Environ()); err != nil {
-			fmt.Fprintln(os.Stderr, "wt: error exec shell:", err)
-			os.Exit(1)
-		}
-	} else {
-		// Recent branch — git checkout in current directory.
-		cmd := exec.Command("git", "checkout", selected.Branch)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
-			os.Exit(1)
-		}
-		// Record usage only after checkout succeeded.
-		_ = wt.RecordUsage(repoRoot, selected.Branch)
+		fmt.Fprintln(os.Stderr, "wt-go: unknown command:", args[0])
+		usage()
+		os.Exit(2)
 	}
 }

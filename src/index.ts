@@ -2,7 +2,16 @@
 import { Command } from "@commander-js/extra-typings";
 import { listCommand } from "./commands/list.js";
 import { goCommand } from "./commands/go.js";
+import { initCommand } from "./commands/init.js";
 import { setupCommand } from "./commands/setup.js";
+import { cleanupCommand } from "./commands/cleanup.js";
+
+// Bypass commander for `wt cleanup …` so flags (--delete, --days, --help) pass
+// through to wt-go without commander hijacking them.
+if (process.argv[2] === "cleanup") {
+  cleanupCommand(process.argv.slice(3));
+  // cleanupCommand calls process.exit — this line is unreachable.
+}
 
 const program = new Command()
   .name("wt")
@@ -16,6 +25,16 @@ program
   .description("List all worktrees in the current repo")
   .action(() => {
     listCommand();
+  });
+
+// ── init ────────────────────────────────────────────────────────────────────
+program
+  .command("init")
+  .description(
+    "Print shell integration code — add eval \"$(wt init)\" to your .zshrc"
+  )
+  .action(() => {
+    initCommand();
   });
 
 // ── go ───────────────────────────────────────────────────────────────────────
@@ -40,5 +59,17 @@ program
   .action(async (opts) => {
     await setupCommand({ yes: opts.yes, overwrite: opts.overwrite });
   });
+
+// ── cleanup ──────────────────────────────────────────────────────────────────
+// Registered for help-text visibility only; actual dispatch happens at the
+// top of this file before commander.parse() runs.
+program
+  .command("cleanup")
+  .description(
+    "Prune stale worktrees (dry-run by default). Pass --delete to actually remove."
+  )
+  .allowUnknownOption(true)
+  .helpOption(false)
+  .action(() => {});
 
 program.parse();
