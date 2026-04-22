@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
+	"time"
 )
 
 type WorktreeInfo struct {
@@ -93,6 +95,23 @@ func looksLikeHash(s string) bool {
 		}
 	}
 	return true
+}
+
+// LastCommitTime returns the commit timestamp of HEAD in the given worktree path.
+func LastCommitTime(path string) (time.Time, bool) {
+	out, err := exec.Command("git", "-C", path, "log", "-1", "--format=%ct").Output()
+	if err != nil {
+		return time.Time{}, false
+	}
+	s := strings.TrimSpace(string(out))
+	if s == "" {
+		return time.Time{}, false
+	}
+	ts, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return time.Unix(ts, 0), true
 }
 
 // GetRecentBranches returns up to `limit` unique branch names from the git

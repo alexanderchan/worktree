@@ -55,6 +55,35 @@ wt go feature-branch   # jump directly by branch name or partial match
 
 Requires [shell integration](#shell-integration-required-for-wt-go) to change your working directory.
 
+#### Auto-run setup on go
+
+Set `WORKTREE_RUN_SETUP_ON_GO=true` to automatically run `wt setup` each time you jump into a worktree:
+
+```bash
+export WORKTREE_RUN_SETUP_ON_GO=true
+```
+
+Add it to your `~/.zshrc` to make it permanent. When enabled, `wt go` will cd into the selected worktree and immediately run `wt setup` — useful if you frequently create new worktrees that need env files copied and dependencies linked.
+
+---
+
+### `wtfzf`
+
+An fzf-powered alternative to `wt go`. Requires [`fzf`](https://github.com/junegunn/fzf) to be installed.
+
+```bash
+wtfzf               # pick from worktrees
+wtfzf --branches    # also include recent branches from git reflog
+```
+
+- ANSI-colored rows (icon, branch name, age, commit hash, use count)
+- Right-pane preview shows `git log -1 --stat` and `git status --short` for the highlighted worktree
+- Selecting a worktree `cd`s into it; selecting a recent branch runs `git checkout`
+- Frecency is recorded the same way as `wt go`
+- Honors `WORKTREE_RUN_SETUP_ON_GO=true`
+
+The `wtfzf` shell function is emitted by `wt init` — no extra setup beyond the existing `eval "$(wt init)"` in your `~/.zshrc`.
+
 ---
 
 ### `wt setup`

@@ -29,6 +29,10 @@ func main() {
 	switch args[0] {
 	case "cleanup":
 		runCleanup(args[1:])
+	case "fzf-list":
+		runFzfList(args[1:])
+	case "record":
+		runRecord(args[1:])
 	case "go", "pick":
 		runPicker(args[1:])
 	case "-h", "--help", "help":

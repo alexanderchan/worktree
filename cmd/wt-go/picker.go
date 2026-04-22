@@ -5,9 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"strconv"
 	"strings"
-	"time"
 
 	wt "github.com/alexanderchan/wt/internal"
 )
@@ -78,7 +76,7 @@ Flags:
 			Head:        tree.Head,
 			ReflogPos:   -1,
 		}
-		if t, ok := lastCommitTime(tree.Path); ok {
+		if t, ok := wt.LastCommitTime(tree.Path); ok {
 			item.ActivityTime = &t
 		}
 		items = append(items, item)
@@ -124,19 +122,3 @@ Flags:
 	}
 }
 
-// lastCommitTime returns the commit time of HEAD in the given worktree.
-func lastCommitTime(path string) (time.Time, bool) {
-	out, err := exec.Command("git", "-C", path, "log", "-1", "--format=%ct").Output()
-	if err != nil {
-		return time.Time{}, false
-	}
-	s := strings.TrimSpace(string(out))
-	if s == "" {
-		return time.Time{}, false
-	}
-	ts, err := strconv.ParseInt(s, 10, 64)
-	if err != nil {
-		return time.Time{}, false
-	}
-	return time.Unix(ts, 0), true
-}

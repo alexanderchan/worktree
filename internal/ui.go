@@ -527,6 +527,11 @@ func renderRowV3(it Item, width int, selected bool) string {
 	return line1 + "\n" + line2 + "\n"
 }
 
+// Exported wrappers for use by cmd/wt-go subcommands.
+func AgeShort(t *time.Time) string      { return ageShort(t) }
+func AgeStyle(t *time.Time) lipgloss.Style { return ageStyle(t) }
+func IsStale(it Item) bool              { return isStale(it) }
+
 // --- Branch details panel ---
 
 // BranchDetails holds async-fetched info about the currently selected item.
