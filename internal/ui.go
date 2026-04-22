@@ -40,8 +40,6 @@ func ScoreItems(items []Item, usage map[string]UsageRecord, reflogLen int) []Ite
 		if r, ok := usage[it.Branch]; ok {
 			it.Score = calcFrecency(r.Count, r.LastUsed)
 			it.UseCount = r.Count
-			t := r.LastUsed
-			it.ActivityTime = &t
 		} else if it.ReflogPos >= 0 {
 			// Synthetic score: most recent reflog entry → ~0.5, oldest → ~0.05
 			frac := float64(reflogLen-1-it.ReflogPos) / float64(max(reflogLen-1, 1))
@@ -59,9 +57,33 @@ func ScoreItems(items []Item, usage map[string]UsageRecord, reflogLen int) []Ite
 		if si != sj {
 			return !si
 		}
+		if c := compareActivity(items[i].ActivityTime, items[j].ActivityTime); c != 0 {
+			return c < 0
+		}
 		return items[i].Score > items[j].Score
 	})
 	return items
+}
+
+// compareActivity orders by ActivityTime descending, nil last. Returns
+// negative if a should sort before b, positive if after, zero if equal.
+func compareActivity(a, b *time.Time) int {
+	if a == nil && b == nil {
+		return 0
+	}
+	if a == nil {
+		return 1
+	}
+	if b == nil {
+		return -1
+	}
+	if a.After(*b) {
+		return -1
+	}
+	if a.Before(*b) {
+		return 1
+	}
+	return 0
 }
 
 func calcFrecency(count int, lastUsed time.Time) float64 {
@@ -106,6 +128,9 @@ func FilterItems(items []Item, query string) []Item {
 		}
 		if results[i].rank != results[j].rank {
 			return results[i].rank > results[j].rank
+		}
+		if c := compareActivity(results[i].item.ActivityTime, results[j].item.ActivityTime); c != 0 {
+			return c < 0
 		}
 		return results[i].item.Score > results[j].item.Score
 	})
