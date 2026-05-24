@@ -115,7 +115,7 @@ func FilterItems(items []Item, query string) []Item {
 	}
 	var results []ranked
 	for _, item := range items {
-		if r := fuzzyRank(item.Branch, query); r > 0 {
+		if r := rankItem(item, query); r > 0 {
 			results = append(results, ranked{item, r})
 		}
 	}
@@ -139,6 +139,38 @@ func FilterItems(items []Item, query string) []Item {
 		out[i] = r.item
 	}
 	return out
+}
+
+// rankItem scores an item against the query by trying the branch name first,
+// then falling back to the path basename. Path-based matches are penalized so
+// branch matches always rank above pure-path matches at the same quality level.
+// This lets users find worktrees whose folder name differs from their branch
+// name (e.g. dir "improve-logging" with branch "worktree-observability-logs-viewer").
+func rankItem(item Item, query string) int {
+	best := fuzzyRank(item.Branch, query)
+	pathName := pathBasename(item.Path)
+	if pathName != "" && !strings.EqualFold(pathName, item.Branch) {
+		if r := fuzzyRank(pathName, query); r > 0 {
+			// Penalty keeps branch matches above path matches of equal quality.
+			r = max(1, r-50)
+			if r > best {
+				best = r
+			}
+		}
+	}
+	return best
+}
+
+// pathBasename returns the final path segment, e.g.
+// "/a/b/improve-logging" → "improve-logging". Empty input returns "".
+func pathBasename(p string) string {
+	if p == "" {
+		return ""
+	}
+	if i := strings.LastIndexAny(p, "/\\"); i >= 0 {
+		return p[i+1:]
+	}
+	return p
 }
 
 func fuzzyRank(branch, query string) int {
@@ -706,10 +738,14 @@ func (m *filterableSelector) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cursor = 0
 			}
 			m.scrollToCursor()
-			if m.showDetails && len(m.filtered) > 0 {
+			if m.showDetails {
+				// Clear stale details so the panel doesn't keep showing the
+				// previously selected item after the filter goes empty.
 				m.details = nil
-				m.detailsLoading = true
-				return m, tea.Batch(cmd, fetchDetails(m.filtered[m.cursor]))
+				m.detailsLoading = len(m.filtered) > 0
+				if len(m.filtered) > 0 {
+					return m, tea.Batch(cmd, fetchDetails(m.filtered[m.cursor]))
+				}
 			}
 			return m, cmd
 		}
@@ -828,9 +864,12 @@ func (m *filterableSelector) View() string {
 
 	if m.showDetails {
 		b.WriteString("\n" + dimStyle.Render(strings.Repeat("─", m.width)) + "\n")
-		if m.detailsLoading {
+		switch {
+		case len(m.filtered) == 0:
+			b.WriteString(dimStyle.Render("  (no selection)") + "\n")
+		case m.detailsLoading:
 			b.WriteString(dimStyle.Render("  Loading…") + "\n")
-		} else if m.details != nil {
+		case m.details != nil:
 			if m.details.Err != "" {
 				b.WriteString(dimStyle.Render("  "+m.details.Err) + "\n")
 			} else {

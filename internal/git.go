@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -95,6 +96,67 @@ func looksLikeHash(s string) bool {
 		}
 	}
 	return true
+}
+
+// WorktreeActivityTime returns the most recent of:
+//   - HEAD commit time
+//   - worktree directory mtime (changes when top-level files are added/removed)
+//   - the per-worktree gitdir index mtime (touched by git add / commit / stash)
+//
+// Falls back through whatever signals are available; returns (zero, false) only
+// when nothing usable is found. Using the index mtime catches activity in
+// worktrees where the user is editing files but hasn't committed yet — pure
+// HEAD-commit-time made those look stale.
+func WorktreeActivityTime(path string) (time.Time, bool) {
+	var best time.Time
+	bump := func(t time.Time) {
+		if t.After(best) {
+			best = t
+		}
+	}
+	if t, ok := LastCommitTime(path); ok {
+		bump(t)
+	}
+	if info, err := os.Stat(path); err == nil {
+		bump(info.ModTime())
+	}
+	if gitdir, ok := resolveGitDir(path); ok {
+		if info, err := os.Stat(filepath.Join(gitdir, "index")); err == nil {
+			bump(info.ModTime())
+		}
+	}
+	if best.IsZero() {
+		return time.Time{}, false
+	}
+	return best, true
+}
+
+// resolveGitDir returns the actual gitdir for a worktree path. The worktree's
+// `.git` is a file containing `gitdir: <path>` pointing into the main repo's
+// `.git/worktrees/<name>/` directory; the main worktree has a real `.git` dir.
+func resolveGitDir(worktreePath string) (string, bool) {
+	gitPath := filepath.Join(worktreePath, ".git")
+	info, err := os.Stat(gitPath)
+	if err != nil {
+		return "", false
+	}
+	if info.IsDir() {
+		return gitPath, true
+	}
+	data, err := os.ReadFile(gitPath)
+	if err != nil {
+		return "", false
+	}
+	line := strings.TrimSpace(string(data))
+	const prefix = "gitdir:"
+	if !strings.HasPrefix(line, prefix) {
+		return "", false
+	}
+	dir := strings.TrimSpace(strings.TrimPrefix(line, prefix))
+	if !filepath.IsAbs(dir) {
+		dir = filepath.Join(worktreePath, dir)
+	}
+	return dir, true
 }
 
 // LastCommitTime returns the commit timestamp of HEAD in the given worktree path.
