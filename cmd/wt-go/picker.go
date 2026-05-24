@@ -76,7 +76,7 @@ Flags:
 			Head:        tree.Head,
 			ReflogPos:   -1,
 		}
-		if t, ok := wt.LastCommitTime(tree.Path); ok {
+		if t, ok := wt.WorktreeActivityTime(tree.Path); ok {
 			item.ActivityTime = &t
 		}
 		items = append(items, item)

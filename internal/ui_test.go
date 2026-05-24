@@ -56,6 +56,23 @@ func TestFuzzyRankInternal(t *testing.T) {
 	}
 }
 
+func TestRankItemBranchBeatsPath(t *testing.T) {
+	// Two items where the same query ("auth") substring-matches one item's
+	// branch and another item's path basename. The branch match should rank
+	// higher so users searching by branch name still see branch-named hits
+	// first.
+	branchHit := Item{Branch: "feature/user-auth", Path: "/repo/.claude/worktrees/unrelated-dir"}
+	pathHit := Item{Branch: "worktree-something", Path: "/repo/.claude/worktrees/fix-auth-flow"}
+
+	got := FilterItems([]Item{pathHit, branchHit}, "auth")
+	if len(got) < 2 {
+		t.Fatalf("expected both items to match, got %d", len(got))
+	}
+	if got[0].Branch != "feature/user-auth" {
+		t.Errorf("branch match should rank first, got %q", got[0].Branch)
+	}
+}
+
 // --- Integration tests: algorithm-agnostic ---
 // These describe WHAT the search should do, not HOW. They should survive
 // algorithm swaps. A regression here means the user experience got worse.
@@ -69,6 +86,10 @@ func TestSearch(t *testing.T) {
 		{Branch: "local-user-ft-access-documentation", Score: 0.1},
 		{Branch: "feature/local-config", Score: 0.1},
 		{Branch: "feature/implement-authentication", Score: 0.1},
+		// Worktree whose folder name diverges from its branch name — the
+		// real-world case where users create a worktree dir like
+		// "improve-logging" but git names the branch something different.
+		{Branch: "worktree-observability-logs-viewer", Path: "/repo/.claude/worktrees/improve-logging", Score: 0.1},
 	}
 
 	cases := []struct {
@@ -112,6 +133,17 @@ func TestSearch(t *testing.T) {
 			// exact match should rank first regardless of frecency score
 			query:     "main",
 			topResult: "main",
+		},
+		{
+			// Path-basename match: "improve" only appears in the worktree
+			// directory name, not in the branch — search must still find it.
+			query:     "improve",
+			mustMatch: []string{"worktree-observability-logs-viewer"},
+		},
+		{
+			// Substring of the path basename ("logging") should match too.
+			query:     "logging",
+			mustMatch: []string{"worktree-observability-logs-viewer"},
 		},
 	}
 
