@@ -56,8 +56,16 @@ program
   )
   .option("-y, --yes", "Skip confirmation prompts")
   .option("--overwrite", "Overwrite existing .env.* files")
+  .option(
+    "--link-node-modules",
+    "Symlink node_modules from main even when a setup-worktree script exists"
+  )
   .action(async (opts) => {
-    await setupCommand({ yes: opts.yes, overwrite: opts.overwrite });
+    await setupCommand({
+      yes: opts.yes,
+      overwrite: opts.overwrite,
+      linkNodeModules: opts.linkNodeModules,
+    });
   });
 
 // ── cleanup ──────────────────────────────────────────────────────────────────

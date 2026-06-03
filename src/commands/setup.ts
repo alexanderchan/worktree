@@ -24,7 +24,11 @@ function detectRunner(scriptPath: string): string[] {
   return ["bash", scriptPath];
 }
 
-export async function setupCommand(params: { yes?: boolean; overwrite?: boolean }) {
+export async function setupCommand(params: {
+  yes?: boolean;
+  overwrite?: boolean;
+  linkNodeModules?: boolean;
+}) {
   if (!isInsideGitRepo()) {
     console.error("Not inside a git repository.");
     process.exit(1);
@@ -42,10 +46,6 @@ export async function setupCommand(params: { yes?: boolean; overwrite?: boolean 
   p.log.info(`Main:     ${main.path}`);
   p.log.info(`Worktree: ${worktreePath}`);
 
-  // ── Plans ────────────────────────────────────────────────────────────────────
-  const envPlans = planEnvCopy({ mainPath: main.path, worktreePath });
-  const nmPlans = planNodeModulesLinks({ mainPath: main.path, worktreePath });
-
   // ── Setup script detection ──────────────────────────────────────────────────
   const setupScriptTs = join(main.path, "scripts/setup-worktree.ts");
   const setupScriptSh = join(main.path, "scripts/setup-worktree.sh");
@@ -55,6 +55,18 @@ export async function setupCommand(params: { yes?: boolean; overwrite?: boolean 
     : existsSync(setupScriptSh)
       ? setupScriptSh
       : null;
+
+  // When the repo ships a setup-worktree script, that script owns dependency
+  // setup (e.g. a real `pnpm install`). Symlinking node_modules from main is
+  // fragile across worktrees, so we skip it and let the script handle deps.
+  // Override with --link-node-modules to force the old symlink behavior.
+  const linkNm = params.linkNodeModules === true || !setupScript;
+
+  // ── Plans ────────────────────────────────────────────────────────────────────
+  const envPlans = planEnvCopy({ mainPath: main.path, worktreePath });
+  const nmPlans = linkNm
+    ? planNodeModulesLinks({ mainPath: main.path, worktreePath })
+    : [];
 
   // ── Preview ─────────────────────────────────────────────────────────────────
   const hasWork =
@@ -87,7 +99,11 @@ export async function setupCommand(params: { yes?: boolean; overwrite?: boolean 
   }
 
   // node_modules
-  if (nmPlans.length > 0) {
+  if (!linkNm) {
+    console.log(
+      "\n  node_modules: handled by setup script (skipping symlink)"
+    );
+  } else if (nmPlans.length > 0) {
     console.log("\n  node_modules (symlink):");
     for (const plan of nmPlans) {
       if (plan.status === "already-exists") {
